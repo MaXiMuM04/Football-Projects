@@ -10,21 +10,30 @@ events['calc_c'] = abs(events['starting_y'] - 40)
 events['calc_c_sq'] = events['calc_c']**2
 events['distance_sq'] = (events['calc_x'])**2 + (events["calc_c"])**2
 events['distance'] = np.sqrt(events['distance_sq'])
-events["angle"] = np.where(np.arctan(7.32 * events["calc_x"] / (events["calc_x"]**2 + events["calc_c"]**2 - (7.32/2)**2)) > 0, np.arctan(7.32 * events["calc_x"] /(events["calc_x"]**2 + events["calc_c"]**2 - (7.32/2)**2)), np.arctan(7.32 * events["calc_x"] /(events["calc_x"]**2 + events["calc_c"]**2 - (7.32/2)**2)) + np.pi)
+events['left_post_sq'] = (events['starting_y']-36.34)**2 + events['calc_x_sq']
+events['right_post_sq'] = (events['starting_y']-43.66)**2 + events['calc_x_sq']
+#CHECK ANGLE
+events["angle"] = np.arccos((events['left_post_sq'] + events['right_post_sq'] - 7.32**2)/(2*np.sqrt(events['left_post_sq'])*np.sqrt(events['right_post_sq'])))
 events['goal'] = np.where(events['shot_outcome_id'] == 97, 1, 0)
 events = events[(events.type_id == 16) | (events.type_id == 30)]
+events['pos_goal'] = 0
+events = events.dropna(subset = 'angle')
 
-delays = 3
-features_to_delay = ['goal']
+goal_data = []
+goals = events[events.shot_outcome_id == 97]
 
-def create_delayed_features(events, features_to_delay, delays):
-    df_delays = [events[features_to_delay].shift(-step).add_suffix(f'+{step}') for step in (range(0, delays))]
-    return pd.concat(df_delays, axis=1)
+for index, row in goals.iterrows():
+    data = [row['possession'], row['match_id']]
+    goal_data.append(data)
 
-df_features = create_delayed_features(events, features_to_delay, delays)
-events['next_goal'] = np.where( (df_features['goal+1']==1) |  (df_features['goal+2']==1), 1, 0) 
+events = events.reset_index()
 
-#Probit model for shooting scoring prob
+for index,row in events.iterrows():
+    data_play =  [row['possession'], row['match_id']]
+    if data_play in goal_data:
+        events.loc[index,'pos_goal'] = 1
+
+    
 shots = events[(events.type_id == 16)]
 shots = shots[shots.shot_type_id == 87]
 y_shot = shots['goal']
@@ -35,11 +44,11 @@ result_xG = probit_xG.fit()
 print(result_xG.summary2())
 params_xG = pd.DataFrame(result_xG.params)
 
-#Probit model for passing scoring prob
+
 passes = events[events.type_id == 30]
 final_third_passes = passes[passes.starting_x >= 80]
 final_third_passes = final_third_passes[final_third_passes.pass_outcome_id != 77]
-y_pass = final_third_passes['next_goal']
+y_pass = final_third_passes['pos_goal']
 X_pass = final_third_passes[x_cols]
 probit_pass = smf.Probit(y_pass, X_pass)
 result_pass = probit_pass.fit()
