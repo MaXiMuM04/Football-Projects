@@ -10,8 +10,8 @@ events['calc_c'] = abs(events['starting_y'] - 40)
 events['calc_c_sq'] = events['calc_c']**2
 events['distance_sq'] = (events['calc_x'])**2 + (events["calc_c"])**2
 events['distance'] = np.sqrt(events['distance_sq'])
-events['left_post_sq'] = (events['starting_y']-36.34)**2 + events['calc_x_sq']
-events['right_post_sq'] = (events['starting_y']-43.66)**2 + events['calc_x_sq']
+events['left_post_sq'] = (events['starting_y']-36.34)**2 + events['calc_x_sq']**2
+events['right_post_sq'] = (events['starting_y']-43.66)**2 + events['calc_x_sq']**2
 #CHECK ANGLE
 events["angle"] = np.arccos((events['left_post_sq'] + events['right_post_sq'] - 7.32**2)/(2*np.sqrt(events['left_post_sq'])*np.sqrt(events['right_post_sq'])))
 events['goal'] = np.where(events['shot_outcome_id'] == 97, 1, 0)
