@@ -1,0 +1,157 @@
+import pandas as pd
+import numpy as np 
+import sqlite3
+from sklearn.impute import IterativeImputer
+from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+#Get match data
+con = sqlite3.connect('C:/Users/mbsch/OneDrive/Bureaublad/database.sqlite')
+matches = pd.read_sql_query("SELECT * from match", con) 
+matches1 = matches[["season",'league_id', 'home_team_goal', "away_team_goal", "home_player_1", "home_player_2" , "home_player_3" , "home_player_4" , "home_player_5" , "home_player_6" , "home_player_7" , "home_player_8", "home_player_9" , "home_player_10" , "home_player_11", "away_player_1", "away_player_2" , "away_player_3"  , "away_player_4" , "away_player_5" , "away_player_6" , "away_player_7" , "away_player_8" , "away_player_9" , "away_player_10" , "away_player_11" ]]
+leagues = [1729, 4769, 7809, 10257, 21518]
+selected_season = '2015/2016'
+games = matches1.loc[(matches1['season'] == selected_season) & (matches1['league_id'].isin(leagues))].dropna()
+games['Goal_Diff'] = games['home_team_goal'] - games['away_team_goal']
+
+#Get player data
+players = pd.read_sql_query("SELECT * from player", con)[['player_api_id', 'player_name']]
+fifa_17_1 = pd.read_csv('C:/Users/mbsch/OneDrive/Bureaublad/FIFA17.csv')[['NAME', 'POSITION', 'RATING']].drop_duplicates(subset = ['NAME'], keep = 'last')
+fifa_17_2 = pd.read_csv("C:/Users/mbsch/OneDrive/Bureaublad/FullData.csv")[['Name', 'National_Position', 'Club_Position', 'Rating']]
+fifa_17_2.replace('Sub', np.nan, inplace=True)
+fifa_17_2.replace('Res', np.nan, inplace=True)
+fifa_17_2["Position"] = np.where(fifa_17_2['Club_Position'].isna(), fifa_17_2['National_Position'], fifa_17_2['Club_Position'])
+fifa_17_2 = fifa_17_2[['Name', "Position", "Rating"]]
+fifa_17_2 = fifa_17_2.rename(columns = {'Name':'NAME', 'Position':'POSITION', 'Rating':'RATING'})
+fifa_17 = pd.concat([fifa_17_1, fifa_17_2]).drop_duplicates(subset = ['NAME'], keep = 'first')
+
+player_info = pd.merge(players, fifa_17, left_on='player_name', right_on='NAME')
+player_info = player_info.drop(['player_name', 'NAME'], axis = 1)
+player_info['POSITION'].value_counts()
+
+#Create Position Groups
+Position = player_info["POSITION"]
+conditions = [(Position == "GK"),
+              (Position == 'RCB') | (Position == 'LCB') | (Position == 'CB'),
+              (Position == "LB") | (Position == "RB") | (Position == "RWB") | (Position == "LWB"),
+              (Position == "LDM") | (Position == "RDM") | (Position == "CDM") | (Position == "RCM") | (Position == "LCM") |(Position == "CM") |  (Position == "RAM") | (Position == "LAM") |(Position == "CAM"), 
+               (Position == "LF") | (Position == "RF") | (Position == 'RM') | (Position == "LM") | (Position == "LW") | (Position == "RW"),
+               (Position == "ST") |(Position == "CF")]
+
+groups = ["Keeper",
+          "Centerback",
+           "Fullback",
+           "Midfielder",
+           "Winger", 
+           "Striker"]
+
+player_info["Position_Group"] = np.select(conditions, groups, "NoPosition")
+player_info['Position_Group'].value_counts()
+
+
+#Combine Datasets
+player_set = player_info[["Position_Group", "RATING"]]
+player_set['Set'] = player_set.apply(list, axis = 1)
+player_set['id'] = player_info["player_api_id"]
+player_set = player_set.drop(["RATING", "Position_Group"], axis = 1)
+player_set = player_set.set_index('id')
+for i, row in player_set.iterrows(): 
+    games = games.applymap(lambda x: row["Set"] if (x == i) else x)
+
+home_games = games[['home_player_1', 'home_player_2', 'home_player_3', 'home_player_4', 'home_player_5', 'home_player_6', 'home_player_7', 'home_player_8', 'home_player_9', 'home_player_10', 'home_player_11', 'Goal_Diff']]
+home_games = home_games.rename(columns = {'home_player_1':'player_1', 'home_player_2':'player_2', 'home_player_3':'player_3', 'home_player_4':'player_4', 'home_player_5':'player_5', 'home_player_6':'player_6', 'home_player_7':'player_7', 'home_player_8':'player_8', 'home_player_9':'player_9', 'home_player_10':'player_10', 'home_player_11':'player_11',})
+away_games = games[['away_player_1', 'away_player_2', 'away_player_3', 'away_player_4', 'away_player_5', 'away_player_6', 'away_player_7', 'away_player_8', 'away_player_9', 'away_player_10', 'away_player_11', 'Goal_Diff']]
+away_games["Goal_Diff"] = -1*away_games['Goal_Diff']
+away_games = away_games.rename(columns = {'away_player_1':'player_1', 'away_player_2':'player_2', 'away_player_3':'player_3', 'away_player_4':'player_4', 'away_player_5':'player_5', 'away_player_6':'player_6', 'away_player_7':'player_7', 'away_player_8':'player_8', 'away_player_9':'player_9', 'away_player_10':'player_10', 'away_player_11':'player_11',})
+games_set = pd.concat([home_games, away_games])
+games_set['Keeper'] = np.nan
+games_set['Centerback'] = np.nan
+games_set['Fullback'] = np.nan
+games_set['Midfielder'] = np.nan
+games_set['Winger'] = np.nan
+games_set['Striker'] = np.nan
+
+
+for i in range(0,len(games_set)): 
+    gk = 0
+    gk_val = 0
+    cb = 0
+    cb_val = 0
+    fb = 0
+    fb_val = 0 
+    mid = 0 
+    mid_val = 0
+    wing = 0
+    wing_val = 0
+    st = 0
+    st_val = 0
+    for j in range(0,11):
+        if type(games_set.iloc[i,j]) == list: 
+            if games_set.iloc[i,j][0] == 'Keeper':
+                gk += 1
+                gk_val += int(games_set.iloc[i,j][1])
+            elif games_set.iloc[i,j][0] == 'Centerback':
+                cb += 1
+                cb_val += int(games_set.iloc[i,j][1])
+            elif games_set.iloc[i,j][0] == 'Fullback':
+                fb += 1
+                fb_val += int(games_set.iloc[i,j][1])
+            elif games_set.iloc[i,j][0] == 'Midfielder':
+                mid += 1
+                mid_val += int(games_set.iloc[i,j][1])
+            elif games_set.iloc[i,j][0] == 'Winger':
+                wing += 1
+                wing_val += int(games_set.iloc[i,j][1])
+            elif games_set.iloc[i,j][0] == 'Striker':
+                st += 1
+                st_val += int(games_set.iloc[i,j][1])
+    if gk != 0:
+        games_set.iloc[i, 12] = gk_val/gk
+    if cb != 0:
+        games_set.iloc[i, 13] = cb_val/cb
+    if fb != 0:
+        games_set.iloc[i, 14] = fb_val/fb
+    if mid != 0:
+        games_set.iloc[i, 15] = mid_val/mid
+    if wing != 0:
+        games_set.iloc[i, 16] = wing_val/wing
+    if st != 0:
+        games_set.iloc[i, 17] = st_val/st
+    
+pre_impute_games = games_set[['Goal_Diff', 'Keeper', 'Centerback', "Fullback", "Midfielder", "Winger", "Striker"]]
+imputer = IterativeImputer(random_state=100, max_iter=10)
+imputer.fit(pre_impute_games)
+imputed_games = pd.DataFrame(imputer.transform(pre_impute_games))
+imputed_games.columns = ['Goal_Diff', 'Keeper', 'Centerback', "Fullback", "Midfielder", "Winger", "Striker"]
+
+home_teams = imputed_games.iloc[:int(0.5*len(imputed_games)) , :]
+home_teams.insert(0, 'Home_ID', range(0, len(home_teams)))
+away_teams = imputed_games.iloc[int(0.5*len(imputed_games)): , :]
+away_teams.columns = ['Away_GD', 'Away_Keeper', 'Away_Centerback', 'Away_Fullback', 'Away_Midfielder', 'Away_Winger', 'Away_Striker']
+away_teams.insert(0, 'Away_ID', range(0, len(away_teams)))
+subtracted_games = home_teams.merge(away_teams, left_on="Home_ID", right_on="Away_ID")
+subtracted_games["Keeper_Diff"] = subtracted_games["Keeper"] - subtracted_games['Away_Keeper']
+subtracted_games["Centerback_Diff"] = subtracted_games["Centerback"] - subtracted_games['Away_Centerback']
+subtracted_games["Fullback_Diff"] = subtracted_games["Fullback"] - subtracted_games['Away_Fullback']
+subtracted_games["Midfielder_Diff"] = subtracted_games["Midfielder"] - subtracted_games['Away_Midfielder']
+subtracted_games["Winger_Diff"] = subtracted_games["Winger"] - subtracted_games['Away_Winger']
+subtracted_games["Striker_Diff"] = subtracted_games["Striker"] - subtracted_games['Away_Striker']
+
+
+y = subtracted_games["Goal_Diff"]
+X = subtracted_games[['Keeper_Diff', 'Centerback_Diff', 'Fullback_Diff', 'Midfielder_Diff', 'Winger_Diff', 'Striker_Diff']]
+reg_model = LinearRegression().fit(X,y)
+intercept = reg_model.intercept_
+coefficients = pd.DataFrame(reg_model.coef_).T
+coefficients.columns = ['Keeper', 'Centerback', 'Fullback', 'Midfielder', 'Winger', 'Striker']
+r2 = reg_model.score(X, y)
+
+pos = np.array(['Keeper', 'Centerback', 'Fullback', 'Midfielder', 'Winger', 'Striker'])
+coef = coefficients.values.reshape(len(coefficients.T)).T
+
+
+font2 = {'size':15}
+plt.bar(pos, coef, color = 'red', edgecolor = 'black', linewidth = 1.3)
+plt.title('Relative Improvement per FIFA Rating Point', fontdict= font2)
+plt.text(2.5, -0.007, "Data: Statsbomb | @StatswithMax")
+plt.savefig('RelativeImprovementRatingPoint2.png', dpi=800, bbox_inches="tight")
+plt.show()
